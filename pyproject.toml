@@ -1,0 +1,8 @@
+[tool.robotpy]
+robotpy_version = "2025.3.2.2"
+robot_class = "robot.py:MyRobot"
+components = [
+    "navx",
+    "rev",
+    "phoenix6",
+]
