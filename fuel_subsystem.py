@@ -21,7 +21,7 @@ SPIN_UP_SECONDS = 1.0
 # fuel subsystem: feeder + intake/launcher rollers
 class FuelSubsystem:
     def __init__(self) -> None:
-        # motor 41 (feeder / intake motor in Java, non-inverted)
+        # motor 41 
         self.feeder = rev.SparkMax(INTAKE_LAUNCHER_MOTOR_ID, rev.SparkMax.MotorType.kBrushless)
         feederConfig = rev.SparkMaxConfig()
         feederConfig.inverted(False)
@@ -32,7 +32,7 @@ class FuelSubsystem:
             rev.PersistMode.kPersistParameters,
         )
 
-        # motor 42 (launcher motor in Java, inverted)
+        # motor 42 
         self.launcher = rev.SparkMax(FEEDER_MOTOR_ID, rev.SparkMax.MotorType.kBrushless)
         launcherConfig = rev.SparkMaxConfig()
         launcherConfig.inverted(True)

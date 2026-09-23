@@ -41,6 +41,10 @@ class MyRobot(wpilib.TimedRobot):
         # edge detection for RS button gyro reset
         self.prevRs = False
 
+        # edge detection and state for A button indirirdover toggle
+        self.prevA = False
+        self.indirirdoverTargetUp = False
+
     def robotPeriodic(self) -> None:
         # update odometry and publish telemetry in all modes (incl. disabled)
         self.swerve.updateOdometry()
@@ -122,16 +126,26 @@ class MyRobot(wpilib.TimedRobot):
         else:
             self.kaldirirdover.stop()
 
-        # a button: full intake (indirirdover up + bicerdover run + eject) while held
-        if self.controller.getAButton():
-            self.bicerdover.full_intake()
+        # a button: toggle indirirdover between up (8.0) and down (0.5)
+        aNow = self.controller.getAButton()
+        if aNow and not self.prevA:
+            self.indirirdoverTargetUp = not self.indirirdoverTargetUp
+            if self.indirirdoverTargetUp:
+                self.bicerdover.set_indirirdover_target(
+                    bicerdover_subsystem.INDIRIRDOVER_UP_POSITION
+                )
+            else:
+                self.bicerdover.set_indirirdover_target(
+                    bicerdover_subsystem.INDIRIRDOVER_DOWN_POSITION
+                )
+        self.prevA = aNow
+
+        # bicerdover + eject run while indirirdover is targeting up
+        if self.indirirdoverTargetUp:
+            self.bicerdover.bicerdover_run()
             self.fuel.eject()
         else:
-            # only stop bicerdover if a is not held (fuel stop handled above)
-            if not self.controller.getLeftBumperButton() and not self.controller.getRightBumperButton():
-                pass  # fuel already stopped above
             self.bicerdover.bicerdover_stop()
-            self.bicerdover.stop_indirirdover()
 
         # b button: donmedolap slow forward while held
         if self.controller.getBButton():
