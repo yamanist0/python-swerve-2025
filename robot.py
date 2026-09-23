@@ -12,7 +12,7 @@ kDeadband = 0.1
 
 
 def _deadband(value: float) -> float:
-    # ignore micro-scale stick movement, rescale the rest to 0..1
+# lets skip tiny stick bumps and stretch the rest to fit 0 to 1
     if abs(value) < kDeadband:
         return 0.0
     return math.copysign((abs(value) - kDeadband) / (1.0 - kDeadband), value)
