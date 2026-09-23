@@ -1,107 +1,179 @@
-#!/usr/bin/env python3
-#
-# FRC 8828 — Swerve Robot (RobotPy 2025)
-#
-
 import math
 import wpilib
 import wpimath
 import wpimath.filter
 import drivetrain
+import fuel_subsystem
+import bicerdover_subsystem
+import kaldirirdover_subsystem
+
+# controller deadband: stick movement below this is ignored (drift filter)
+kDeadband = 0.1
 
 
+def _deadband(value: float) -> float:
+    # ignore micro-scale stick movement, rescale the rest to 0..1
+    if abs(value) < kDeadband:
+        return 0.0
+    return math.copysign((abs(value) - kDeadband) / (1.0 - kDeadband), value)
+
+
+# main robot class
 class MyRobot(wpilib.TimedRobot):
     def robotInit(self) -> None:
         self.controller = wpilib.XboxController(0)
         self.swerve = drivetrain.Drivetrain()
 
-        # Slew rate limiter — ani hız değişimlerini yumuşatır (1/3 s'de 0→1)
+        # additional subsystems from raptor-2026
+        self.fuel = fuel_subsystem.FuelSubsystem()
+        self.bicerdover = bicerdover_subsystem.BicerdoverSubsystem()
+        self.kaldirirdover = kaldirirdover_subsystem.KaldirirdoverSubsystem()
+
+        # initialize limiters
         self.xspeedLimiter = wpimath.filter.SlewRateLimiter(3)
         self.yspeedLimiter = wpimath.filter.SlewRateLimiter(3)
         self.rotLimiter = wpimath.filter.SlewRateLimiter(3)
 
-        # Otonom zamanlayıcı
+        # autonomous timer
         self.autoTimer = wpilib.Timer()
         self.autoPhase = 0
 
-    # ==========================================================================
-    # OTONOM — Basit zamanlayıcı bazlı sekans
-    # ==========================================================================
-    #   Aşama 0: 1 s ileri sürüş (0.5 m/s)
-    #   Aşama 1: 2 s bekleme (fren)
-    #   Aşama 2: 1 s 360° dönüş (2π rad/s)
-    #   Aşama 3: Dur
+        # edge detection for d-pad up gyro reset
+        self.prevPovUp = False
+
+    def robotPeriodic(self) -> None:
+        # update odometry and publish telemetry in all modes (incl. disabled)
+        self.swerve.updateOdometry()
+
+        # run indirirdover pid loop every cycle
+        self.bicerdover.update_indirirdover_pid()
+
+        # publish bicerdover telemetry
+        self.bicerdover.update_telemetry()
+
+        # debug: controller diagnostics, remove after tuning
+        for i in range(6):
+            wpilib.SmartDashboard.putNumber(
+                f"joy/axis{i}", wpilib.DriverStation.getStickAxis(0, i)
+            )
 
     def autonomousInit(self) -> None:
         self.autoPhase = 0
         self.autoTimer.restart()
+        self.swerve.cancelTurn()
 
     def autonomousPeriodic(self) -> None:
         elapsed = self.autoTimer.get()
 
         if self.autoPhase == 0:
-            # 1 s boyunca ileri sür
+            # drive forward
             if elapsed < 1.0:
-                self.swerve.drive(0.5, 0, 0, False, self.getPeriod())
+                self.swerve.drive(2.5, 0, 0, False, self.getPeriod())
             else:
                 self.swerve.stop()
                 self.autoTimer.restart()
                 self.autoPhase = 1
 
         elif self.autoPhase == 1:
-            # 2 s boyunca dur (fren)
+            # pause
             if elapsed < 2.0:
                 self.swerve.stop()
             else:
                 self.autoTimer.restart()
-                self.autoPhase = 2
-
-        elif self.autoPhase == 2:
-            # 1 s boyunca yerinde 360° dön (2π rad/s)
-            if elapsed < 1.0:
-                self.swerve.drive(0, 0, 2 * math.pi, False, self.getPeriod())
-            else:
-                self.swerve.stop()
                 self.autoPhase = 3
 
+        # elif self.autoPhase == 2:
+        #     # turn 360 degrees, closed-loop on the gyro
+        #     done = self.swerve.turnToAngle(360, self.getPeriod())
+        #     if done or elapsed > 5.0:
+        #         self.swerve.stop()
+        #         self.autoPhase = 3
+
         else:
-            # Otonom bitti — dur
+            # stop
             self.swerve.stop()
-
-        self.swerve.updateOdometry()
-
-    # ==========================================================================
-    # TELEOP
-    # ==========================================================================
 
     def teleopPeriodic(self) -> None:
         self._driveWithJoystick(fieldRelative=True)
+        self._handleSubsystemButtons()
+
+        # d-pad up: reset gyro heading (rising edge only)
+        povUpNow = self.controller.getPOV() == 0
+        if povUpNow and not self.prevPovUp:
+            self.swerve.resetGyro()
+        self.prevPovUp = povUpNow
+
+    def _handleSubsystemButtons(self) -> None:
+        # lb (left bumper): intake while held
+        if self.controller.getLeftBumperButton():
+            self.fuel.intake()
+        # rb (right bumper): launch while held
+        elif self.controller.getRightBumperButton():
+            self.fuel.launch()
+        else:
+            self.fuel.stop()
+
+        # rt (right trigger): kaldirirdover up while held
+        if self.controller.getRightTriggerAxis() > 0.5:
+            self.kaldirirdover.yukari()
+        # lt (left trigger): kaldirirdover down while held
+        elif self.controller.getLeftTriggerAxis() > 0.5:
+            self.kaldirirdover.asagi()
+        else:
+            self.kaldirirdover.stop()
+
+        # a button: full intake (indirirdover up + bicerdover run + eject) while held
+        if self.controller.getAButton():
+            self.bicerdover.full_intake()
+            self.fuel.eject()
+        else:
+            # only stop bicerdover if a is not held (fuel stop handled above)
+            if not self.controller.getLeftBumperButton() and not self.controller.getRightBumperButton():
+                pass  # fuel already stopped above
+            self.bicerdover.bicerdover_stop()
+            self.bicerdover.stop_indirirdover()
+
+        # b button: donmedolap slow forward while held
+        if self.controller.getBButton():
+            self.bicerdover.donmedolap_run()
+        # y button: donmedolap slow reverse while held
+        elif self.controller.getYButton():
+            self.bicerdover.donmedolap_reverse()
+        else:
+            self.bicerdover.donmedolap_stop()
 
     def _driveWithJoystick(self, fieldRelative: bool) -> None:
-        # İleri/geri (sol joystick Y — ters çevrilmiş)
+        # forward speed
         xSpeed = (
             -self.xspeedLimiter.calculate(
-                wpimath.applyDeadband(self.controller.getLeftY(), 0.1)
+                _deadband(self.controller.getLeftY())
             )
             * drivetrain.kMaxSpeed
         )
 
-        # Sağa/sola (sol joystick X — ters çevrilmiş)
+        # strafe speed
         ySpeed = (
             -self.yspeedLimiter.calculate(
-                wpimath.applyDeadband(self.controller.getLeftX(), 0.1)
+                _deadband(self.controller.getLeftX())
             )
             * drivetrain.kMaxSpeed
         )
 
-        # Dönüş (sağ joystick X — ters çevrilmiş)
+        # rotation speed
         rot = (
             -self.rotLimiter.calculate(
-                wpimath.applyDeadband(self.controller.getRightX(), 0.1)
+                _deadband(self.controller.getRightX())
             )
             * drivetrain.kMaxAngularSpeed
         )
 
+        # drive robot
         self.swerve.drive(xSpeed, ySpeed, rot, fieldRelative, self.getPeriod())
+
+        # debug: commanded outputs, remove after tuning
+        wpilib.SmartDashboard.putNumber("joy/xSpeed", xSpeed)
+        wpilib.SmartDashboard.putNumber("joy/ySpeed", ySpeed)
+        wpilib.SmartDashboard.putNumber("joy/rot", rot)
+
 
 

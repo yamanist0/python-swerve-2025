@@ -1,53 +1,54 @@
-#
-# Drivetrain — NavX + 4x Swerve Module
-# RobotPy 2025 / WPILib native
-#
-
 import math
+import wpilib
 import navx
+import wpimath.controller
 import wpimath.geometry
 import wpimath.kinematics
+import wpimath.trajectory
 import swervemodule
 
-kMaxSpeed = 4.5  # metre/saniye
-kMaxAngularSpeed = 11.5  # rad/saniye
+kMaxSpeed = 4.5  # max speed in meters per second
+kMaxAngularSpeed = math.pi  # max rotation speed in radians per second
 
 
+# drivetrain subsystem
 class Drivetrain:
-    """Swerve drive alt sistemi — 4 adet NEO swerve modülü + NavX gyro."""
-
     def __init__(self) -> None:
-        # Modül konumları (inç → metre): 9.84 inç × 0.0254 = ~0.24994 m
-        dist = 9.84 * 0.0254
+        # module distance from center
+        dist = 11.1 * 0.0254
 
         self.frontLeftLocation = wpimath.geometry.Translation2d(dist, dist)
         self.frontRightLocation = wpimath.geometry.Translation2d(dist, -dist)
-        self.backLeftLocation = wpimath.geometry.Translation2d(-dist, -dist)
-        self.backRightLocation = wpimath.geometry.Translation2d(-dist, dist)
+        self.backLeftLocation = wpimath.geometry.Translation2d(-dist, dist)
+        self.backRightLocation = wpimath.geometry.Translation2d(-dist, -dist)
 
-        # --- Swerve Modülleri (CAN ID'leri + CANCoder offset'leri) ---
+        # swerve modules setup
         self.frontLeft = swervemodule.SwerveModule(
             driveMotorID=21, turningMotorID=22, cancoderID=15,
-            encoderOffset=0.78,
+            encoderOffset=105.029,
+            driveInverted=True, turningInverted=True,
         )
         self.frontRight = swervemodule.SwerveModule(
             driveMotorID=27, turningMotorID=28, cancoderID=17,
-            encoderOffset=0.76,
+            encoderOffset=94.833,
+            driveInverted=True, turningInverted=True,
         )
         self.backLeft = swervemodule.SwerveModule(
             driveMotorID=23, turningMotorID=24, cancoderID=16,
-            encoderOffset=0.49,
+            encoderOffset=183.4277,
+            driveInverted=True, turningInverted=True,
         )
         self.backRight = swervemodule.SwerveModule(
             driveMotorID=25, turningMotorID=26, cancoderID=18,
-            encoderOffset=344.0,
+            encoderOffset=325.28,
+            driveInverted=True, turningInverted=True,
         )
 
-        # --- NavX Gyroscope (SPI MXP) ---
+        # navx gyro setup
         self.gyro = navx.AHRS(navx.AHRS.NavXComType.kMXP_SPI)
-        self.gyroInverted = True
+        self.gyroInverted = False
 
-        # --- Kinematics & Odometry ---
+        # kinematics and odometry setup
         self.kinematics = wpimath.kinematics.SwerveDrive4Kinematics(
             self.frontLeftLocation,
             self.frontRightLocation,
@@ -66,16 +67,52 @@ class Drivetrain:
             ),
         )
 
+        # closed-loop heading controller for autonomous turns
+        self.turnController = wpimath.controller.ProfiledPIDController(
+            4.0,
+            0.0,
+            0.2,
+            wpimath.trajectory.TrapezoidProfile.Constraints(
+                2 * math.pi, 4 * math.pi
+            ),
+        )
+        self.turnController.setTolerance(math.radians(2))
+        self.turnTarget = None
+
     def _getGyroRotation(self) -> wpimath.geometry.Rotation2d:
-        """NavX'ten yaw açısını döndürür (inverted destekli)."""
-        yaw = self.gyro.getYaw()
+        # get gyro rotation angle in WPILib convention (CCW positive)
+        rotation = self.gyro.getRotation2d()
         if self.gyroInverted:
-            yaw = -yaw
-        return wpimath.geometry.Rotation2d.fromDegrees(yaw)
+            rotation = -rotation
+        return rotation
 
     def resetGyro(self) -> None:
-        """Gyroscope'u sıfırlar."""
+        # reset gyro angle
         self.gyro.reset()
+
+    def _getContinuousAngle(self) -> float:
+        # continuous CCW-positive heading in radians
+        # (navx getAngle is clockwise-positive and does not wrap at +/-180)
+        return -math.radians(self.gyro.getAngle())
+
+    def turnToAngle(self, deltaDegrees: float, periodSeconds: float) -> bool:
+        # closed-loop relative turn; returns True when the target heading is reached
+        current = self._getContinuousAngle()
+        if self.turnTarget is None:
+            self.turnTarget = current + math.radians(deltaDegrees)
+            self.turnController.reset(current)
+        rot = self.turnController.calculate(current, self.turnTarget)
+        rot = max(-kMaxAngularSpeed, min(kMaxAngularSpeed, rot))
+        self.drive(0, 0, rot, False, periodSeconds)
+        if self.turnController.atGoal():
+            self.turnTarget = None
+            self.stop()
+            return True
+        return False
+
+    def cancelTurn(self) -> None:
+        # abort an in-progress closed-loop turn
+        self.turnTarget = None
 
     def drive(
         self,
@@ -85,14 +122,7 @@ class Drivetrain:
         fieldRelative: bool,
         periodSeconds: float,
     ) -> None:
-        """
-        Joystick girdileriyle robotu sürer.
-        :param xSpeed: İleri/geri hız (m/s).
-        :param ySpeed: Sağa/sola hız (m/s).
-        :param rot: Dönüş hızı (rad/s).
-        :param fieldRelative: Saha referanslı mı?
-        :param periodSeconds: Döngü periyodu.
-        """
+        # drive robot with joystick inputs
         swerveModuleStates = self.kinematics.toSwerveModuleStates(
             wpimath.kinematics.ChassisSpeeds.discretize(
                 (
@@ -105,7 +135,7 @@ class Drivetrain:
                 periodSeconds,
             )
         )
-        wpimath.kinematics.SwerveDrive4Kinematics.desaturateWheelSpeeds(
+        swerveModuleStates = wpimath.kinematics.SwerveDrive4Kinematics.desaturateWheelSpeeds(
             swerveModuleStates, kMaxSpeed
         )
         self.frontLeft.setDesiredState(swerveModuleStates[0])
@@ -114,17 +144,15 @@ class Drivetrain:
         self.backRight.setDesiredState(swerveModuleStates[3])
 
     def stop(self) -> None:
-        """Tüm modülleri durdurur."""
-        zeroState = wpimath.kinematics.SwerveModuleState(
-            0, wpimath.geometry.Rotation2d(0)
-        )
-        self.frontLeft.setDesiredState(zeroState)
-        self.frontRight.setDesiredState(zeroState)
-        self.backLeft.setDesiredState(zeroState)
-        self.backRight.setDesiredState(zeroState)
+        # stop all modules in place
+        self.turnTarget = None
+        self.frontLeft.stop()
+        self.frontRight.stop()
+        self.backLeft.stop()
+        self.backRight.stop()
 
     def updateOdometry(self) -> None:
-        """Sahadaki konumu günceller."""
+        # update robot field position
         self.odometry.update(
             self._getGyroRotation(),
             (
@@ -134,3 +162,22 @@ class Drivetrain:
                 self.backRight.getPosition(),
             ),
         )
+
+        # debug: calibration telemetry, remove after tuning
+        wpilib.SmartDashboard.putNumber("gyro/yaw", self._getGyroRotation().degrees())
+        pose = self.odometry.getPose()
+        wpilib.SmartDashboard.putNumber("odometry/x", pose.X())
+        wpilib.SmartDashboard.putNumber("odometry/y", pose.Y())
+        for name, module in (
+            ("fl", self.frontLeft),
+            ("fr", self.frontRight),
+            ("bl", self.backLeft),
+            ("br", self.backRight),
+        ):
+            wpilib.SmartDashboard.putNumber(
+                f"module/{name}/angle", module._getTurningAngle().degrees()
+            )
+            wpilib.SmartDashboard.putNumber(
+                f"module/{name}/speed", module._getDriveVelocity()
+            )
+

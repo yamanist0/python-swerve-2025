@@ -1,8 +1,10 @@
 [tool.robotpy]
-robotpy_version = "2025.3.2.2"
+robotpy_version = "2026.2.2"
 robot_class = "robot.py:MyRobot"
-components = [
-    "navx",
-    "rev",
-    "phoenix6",
+
+# Other pip packages to install, such as vendor packages
+requires = [
+    "robotpy-navx==2026.0.1.1",
+    "robotpy-rev==2026.0.4",
+    "phoenix6==26.3.0",
 ]

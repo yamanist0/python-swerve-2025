@@ -1,8 +1,3 @@
-#
-# Swerve Module — NEO (SparkMax) + CANCoder
-# RobotPy 2025 / WPILib native
-#
-
 import math
 
 import rev
@@ -12,37 +7,31 @@ import wpimath.geometry
 import wpimath.kinematics
 import wpimath.trajectory
 
-# --- Fiziksel sabitler ---
+# physical constants
 kWheelDiameterInches = 4.0
-kWheelCircumferenceMeters = kWheelDiameterInches * math.pi * 0.0254  # ~0.3192 m
-kDriveGearRatio = 6.75  # motor dönüşü / tekerlek dönüşü
-kAngleGearRatio = 12.8  # motor dönüşü / modül dönüşü
+kWheelCircumferenceMeters = kWheelDiameterInches * math.pi * 0.0254  # wheel circumference
+kDriveGearRatio = 6.75  # drive gear ratio
 
-# Drive encoder → metre ve m/s dönüşüm katsayısı
-#   1 motor dönüşü = (çevre / gear_ratio) metre
-kDrivePositionFactor = kWheelCircumferenceMeters / kDriveGearRatio  # metre/dönüş
-kDriveVelocityFactor = kDrivePositionFactor / 60.0  # metre/saniye  (RPM → m/s)
+# conversion factors
+kDrivePositionFactor = kWheelCircumferenceMeters / kDriveGearRatio  # meters per revolution
+kDriveVelocityFactor = kDrivePositionFactor / 60.0  # meters per second
 
-# Angle encoder → radyan dönüşüm katsayısı
-kAnglePositionFactor = math.tau / kAngleGearRatio  # radyan/motor-dönüşü
-
-kModuleMaxAngularVelocity = 11.5  # rad/s
-kModuleMaxAngularAcceleration = 2 * math.tau  # rad/s²
+kModuleMaxAngularVelocity = 11.5  # max turn speed
+kModuleMaxAngularAcceleration = 2 * math.tau  # max turn acceleration
 
 
+# swerve module implementation
 class SwerveModule:
-    """Tek bir swerve modülü: NEO drive + NEO azimuth + CANCoder absolute encoder."""
-
     def __init__(
         self,
         driveMotorID: int,
         turningMotorID: int,
         cancoderID: int,
-        encoderOffset: float,  # derece cinsinden
+        encoderOffset: float,
         driveInverted: bool = False,
         turningInverted: bool = False,
     ) -> None:
-        # ===================== DRIVE MOTOR (SparkMax + NEO) =====================
+        # drive motor configuration
         self.driveMotor = rev.SparkMax(driveMotorID, rev.SparkMax.MotorType.kBrushless)
 
         driveConfig = rev.SparkMaxConfig()
@@ -50,17 +39,18 @@ class SwerveModule:
         driveConfig.smartCurrentLimit(40)
         driveConfig.openLoopRampRate(0.25)
         driveConfig.inverted(driveInverted)
+        driveConfig.voltageCompensation(12)
         driveConfig.encoder.positionConversionFactor(kDrivePositionFactor)
         driveConfig.encoder.velocityConversionFactor(kDriveVelocityFactor)
         self.driveMotor.configure(
             driveConfig,
-            rev.SparkMax.ResetMode.kResetSafeParameters,
-            rev.SparkMax.PersistMode.kPersistParameters,
+            rev.ResetMode.kResetSafeParameters,
+            rev.PersistMode.kPersistParameters,
         )
 
         self.driveEncoder = self.driveMotor.getEncoder()
 
-        # ===================== TURNING MOTOR (SparkMax + NEO) ===================
+        # turning motor configuration
         self.turningMotor = rev.SparkMax(turningMotorID, rev.SparkMax.MotorType.kBrushless)
 
         turnConfig = rev.SparkMaxConfig()
@@ -68,26 +58,24 @@ class SwerveModule:
         turnConfig.smartCurrentLimit(20)
         turnConfig.openLoopRampRate(0.25)
         turnConfig.inverted(turningInverted)
+        turnConfig.voltageCompensation(12)
         self.turningMotor.configure(
             turnConfig,
-            rev.SparkMax.ResetMode.kResetSafeParameters,
-            rev.SparkMax.PersistMode.kPersistParameters,
+            rev.ResetMode.kResetSafeParameters,
+            rev.PersistMode.kPersistParameters,
         )
 
-        # ===================== CANCODER (Absolute Encoder) ======================
+        # cancoder configuration
         self.cancoder = phoenix6.hardware.CANcoder(cancoderID)
-        # Offset derece cinsinden kaydedildi; CANCoder radyan cinsinden okuyacağız
         self.encoderOffsetRad = math.radians(encoderOffset)
 
-        # ===================== PID KONTROLCÜLERİ ===============================
-        self.drivePIDController = wpimath.controller.PIDController(
-            0.0020645, 0, 0
-        )
+        # pid controllers
+        self.drivePIDController = wpimath.controller.PIDController(1.0, 0, 0)
 
         self.turningPIDController = wpimath.controller.ProfiledPIDController(
-            0.0020645,
+            7.5,
             0,
-            0,
+            0.1,
             wpimath.trajectory.TrapezoidProfile.Constraints(
                 kModuleMaxAngularVelocity,
                 kModuleMaxAngularAcceleration,
@@ -95,32 +83,32 @@ class SwerveModule:
         )
         self.turningPIDController.enableContinuousInput(-math.pi, math.pi)
 
-        self.driveFeedforward = wpimath.controller.SimpleMotorFeedforwardMeters(0, 3)
-        self.turnFeedforward = wpimath.controller.SimpleMotorFeedforwardMeters(0, 0.5)
+        # feedforward controllers
+        self.driveFeedforward = wpimath.controller.SimpleMotorFeedforwardMeters(0.1, 2.65)
 
-    # ---- Yardımcı: CANCoder'dan modülün mutlak açısını oku ----
     def _getTurningAngle(self) -> wpimath.geometry.Rotation2d:
-        """CANCoder'dan mutlak açıyı okur (offset uygulanmış, radyan)."""
-        # CANCoder rotations (0-1 arası) → radyan
-        absPos = self.cancoder.get_absolute_position().value  # rotations
+        # get absolute turning angle
+        absPos = self.cancoder.get_absolute_position().value
         angleRad = absPos * math.tau - self.encoderOffsetRad
         return wpimath.geometry.Rotation2d(angleRad)
 
-    # ---- Yardımcı: Sürüş hızı (m/s) ----
     def _getDriveVelocity(self) -> float:
+        # get drive velocity
         return self.driveEncoder.getVelocity()
 
-    # ---- Yardımcı: Sürüş pozisyonu (m) ----
     def _getDrivePosition(self) -> float:
+        # get drive position
         return self.driveEncoder.getPosition()
 
     def getState(self) -> wpimath.kinematics.SwerveModuleState:
+        # get module state
         return wpimath.kinematics.SwerveModuleState(
             self._getDriveVelocity(),
             self._getTurningAngle(),
         )
 
     def getPosition(self) -> wpimath.kinematics.SwerveModulePosition:
+        # get module position
         return wpimath.kinematics.SwerveModulePosition(
             self._getDrivePosition(),
             self._getTurningAngle(),
@@ -129,25 +117,25 @@ class SwerveModule:
     def setDesiredState(
         self, desiredState: wpimath.kinematics.SwerveModuleState
     ) -> None:
+        # set module state
         encoderRotation = self._getTurningAngle()
 
-        # En kısa yol optimizasyonu (>90° dönme yerine motoru ters çevir)
         desiredState.optimize(encoderRotation)
-        # Açı hatasının kosinüsüyle hızı ölçekle (daha yumuşak sürüş)
         desiredState.cosineScale(encoderRotation)
 
-        # Drive çıkışı
         driveOutput = self.drivePIDController.calculate(
             self._getDriveVelocity(), desiredState.speed
         )
         driveFF = self.driveFeedforward.calculate(desiredState.speed)
         self.driveMotor.setVoltage(driveOutput + driveFF)
 
-        # Turning çıkışı
         turnOutput = self.turningPIDController.calculate(
             encoderRotation.radians(), desiredState.angle.radians()
         )
-        turnFF = self.turnFeedforward.calculate(
-            self.turningPIDController.getSetpoint().velocity
-        )
-        self.turningMotor.setVoltage(turnOutput + turnFF)
+        self.turningMotor.setVoltage(turnOutput)
+
+    def stop(self) -> None:
+        # stop both motors in place without re-aiming the wheels
+        self.driveMotor.stopMotor()
+        self.turningMotor.stopMotor()
+
