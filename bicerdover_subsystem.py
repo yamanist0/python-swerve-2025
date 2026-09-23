@@ -68,7 +68,7 @@ class BicerdoverSubsystem:
         self.indirirdover_pid.setTolerance(0.02)
         self.indirirdover_pid_enabled = False
 
-    # --- bicerdover ---
+    # bicerdover
 
     def bicerdover_run(self) -> None:
         # run bicerdover mechanism
@@ -78,7 +78,7 @@ class BicerdoverSubsystem:
         # stop bicerdover mechanism
         self.bicerdover_motor.setVoltage(0)
 
-    # --- donmedolap ---
+    # donmedolap
 
     def donmedolap_run(self) -> None:
         # run donmedolap forward at slow speed
@@ -92,7 +92,7 @@ class BicerdoverSubsystem:
         # stop donmedolap
         self.donmedolap_motor.setVoltage(0)
 
-    # --- indirirdover (pid position control) ---
+    # indirirdover (pid position control)
 
     def set_indirirdover_target(self, position: float) -> None:
         # set indirirdover target position and enable pid
@@ -118,7 +118,7 @@ class BicerdoverSubsystem:
         output = max(-INDIRIRDOVER_MAX_VOLTAGE, min(INDIRIRDOVER_MAX_VOLTAGE, output))
         self.indirirdover_motor.setVoltage(output)
 
-    # --- combined commands ---
+    # combined commands
 
     def full_intake(self) -> None:
         # indirirdover goes to up position + bicerdover runs

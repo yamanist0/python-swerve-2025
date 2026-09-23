@@ -21,9 +21,10 @@ SPIN_UP_SECONDS = 1.0
 # fuel subsystem: feeder + intake/launcher rollers
 class FuelSubsystem:
     def __init__(self) -> None:
-        # feeder motor (id 42)
-        self.feeder = rev.SparkMax(FEEDER_MOTOR_ID, rev.SparkMax.MotorType.kBrushless)
+        # motor 41 (feeder / intake motor in Java, non-inverted)
+        self.feeder = rev.SparkMax(INTAKE_LAUNCHER_MOTOR_ID, rev.SparkMax.MotorType.kBrushless)
         feederConfig = rev.SparkMaxConfig()
+        feederConfig.inverted(False)
         feederConfig.smartCurrentLimit(FEEDER_MOTOR_CURRENT_LIMIT)
         self.feeder.configure(
             feederConfig,
@@ -31,8 +32,8 @@ class FuelSubsystem:
             rev.PersistMode.kPersistParameters,
         )
 
-        # intake/launcher motor (id 41, inverted)
-        self.launcher = rev.SparkMax(INTAKE_LAUNCHER_MOTOR_ID, rev.SparkMax.MotorType.kBrushless)
+        # motor 42 (launcher motor in Java, inverted)
+        self.launcher = rev.SparkMax(FEEDER_MOTOR_ID, rev.SparkMax.MotorType.kBrushless)
         launcherConfig = rev.SparkMaxConfig()
         launcherConfig.inverted(True)
         launcherConfig.smartCurrentLimit(LAUNCHER_MOTOR_CURRENT_LIMIT)

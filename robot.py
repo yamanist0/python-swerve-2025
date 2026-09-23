@@ -38,8 +38,8 @@ class MyRobot(wpilib.TimedRobot):
         self.autoTimer = wpilib.Timer()
         self.autoPhase = 0
 
-        # edge detection for d-pad up gyro reset
-        self.prevPovUp = False
+        # edge detection for RS button gyro reset
+        self.prevRs = False
 
     def robotPeriodic(self) -> None:
         # update odometry and publish telemetry in all modes (incl. disabled)
@@ -97,11 +97,11 @@ class MyRobot(wpilib.TimedRobot):
         self._driveWithJoystick(fieldRelative=True)
         self._handleSubsystemButtons()
 
-        # d-pad up: reset gyro heading (rising edge only)
-        povUpNow = self.controller.getPOV() == 0
-        if povUpNow and not self.prevPovUp:
+        # RS (Right Stick click): reset gyro heading (rising edge only)
+        rsNow = self.controller.getRightStickButton()
+        if rsNow and not self.prevRs:
             self.swerve.resetGyro()
-        self.prevPovUp = povUpNow
+        self.prevRs = rsNow
 
     def _handleSubsystemButtons(self) -> None:
         # lb (left bumper): intake while held
@@ -143,21 +143,24 @@ class MyRobot(wpilib.TimedRobot):
             self.bicerdover.donmedolap_stop()
 
     def _driveWithJoystick(self, fieldRelative: bool) -> None:
+        joyX = _deadband(self.controller.getLeftY())
+        joyY = _deadband(self.controller.getLeftX())
+        pov = self.controller.getPOV()
+
+        # use d-pad for precise directional driving when left stick is idle
+        if joyX == 0 and joyY == 0 and pov != -1:
+            pov_rad = math.radians(pov)
+            raw_x = round(math.cos(pov_rad), 4)
+            raw_y = round(-math.sin(pov_rad), 4)
+        else:
+            raw_x = -joyX
+            raw_y = -joyY
+
         # forward speed
-        xSpeed = (
-            -self.xspeedLimiter.calculate(
-                _deadband(self.controller.getLeftY())
-            )
-            * drivetrain.kMaxSpeed
-        )
+        xSpeed = self.xspeedLimiter.calculate(raw_x) * drivetrain.kMaxSpeed
 
         # strafe speed
-        ySpeed = (
-            -self.yspeedLimiter.calculate(
-                _deadband(self.controller.getLeftX())
-            )
-            * drivetrain.kMaxSpeed
-        )
+        ySpeed = self.yspeedLimiter.calculate(raw_y) * drivetrain.kMaxSpeed
 
         # rotation speed
         rot = (
