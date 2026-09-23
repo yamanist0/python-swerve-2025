@@ -64,6 +64,6 @@ class FuelSubsystem:
         self.launcher.setVoltage(LAUNCHING_LAUNCHER_VOLTAGE)
 
     def stop(self) -> None:
-        # stop both motors
+# we stop both motors here so it does not keep spinning
         self.feeder.set(0)
         self.launcher.set(0)
