@@ -127,6 +127,7 @@ class BicerdoverSubsystem:
 
     def stop_all(self) -> None:
         # stop all motors in this subsystem
+        print("Stopping all motors")
         self.bicerdover_stop()
         self.stop_indirirdover()
         self.donmedolap_stop()
