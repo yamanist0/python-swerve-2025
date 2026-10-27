@@ -87,7 +87,7 @@ class Drivetrain:
         return rotation
 
     def resetGyro(self) -> None:
-        # reset gyro angle
+# sets the gyro angle back to zero
         self.gyro.reset()
 
     def _getContinuousAngle(self) -> float:
